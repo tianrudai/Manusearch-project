@@ -1,0 +1,10 @@
+cachetools
+trafilatura
+json-repair
+htmldate
+pydantic
+requests
+openai
+asyncio
+numpy
+argparse
