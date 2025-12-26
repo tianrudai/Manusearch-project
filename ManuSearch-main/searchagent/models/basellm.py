@@ -500,7 +500,7 @@ class GPTAPI(BaseAPILLM):
             except KeyboardInterrupt:
                 raise  # 重新抛出让上层处理
             except Exception as e:
-                logger.error(f"Streaming error: {str(e)}")
+                self.logger.error(f"Streaming error: {str(e)}")
                 raise
             finally:
                 # 确保响应流被关闭
