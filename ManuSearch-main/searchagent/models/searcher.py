@@ -320,6 +320,16 @@ class Searcher(BaseStreamingAgent):
             
         """            
         print(ref)
+        
+        if isinstance(ref, dict):
+            # 核心修改：提取answer字段，不存在则用空字符串兜底
+            ref = ref.get('answer', '')
+        elif ref is None:
+            # 如果是None，初始化为空字符串
+            ref = ""
+        elif not isinstance(ref, (str, bytes)):
+            # 其他类型，强制转换为字符串
+            ref = str(ref)
         #numbers = list({int(n) for n in re.findall(r"\[\[(\d+)\]\]", ref)})
         numbers = extract_reference_numbers(ref)
 

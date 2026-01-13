@@ -9,12 +9,108 @@ from ..schema import ModelStatusCode
 from ..schema import AgentMessage 
 from ..utils.memory import Memory, MemoryManager
 from ..utils.utils import remove_think_tags
-
+from pydantic import BaseModel
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
     Function,
 )
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
+
+
+def normalize_message_content(messages):
+    """
+    标准化message的content字段为字符串，兼容字典和ChatCompletionMessage对象
+    :param messages: 消息列表（元素为字典或ChatCompletionMessage对象）
+    :return: 标准化后的消息列表（转为字典格式）
+    """
+    normalized = []
+    for msg in messages:
+        # 1. 处理ChatCompletionMessage对象：转为字典
+        if isinstance(msg, (BaseModel, object)) and hasattr(msg, 'model_dump'):
+            # Pydantic v2 使用 model_dump() 转为字典
+            msg_dict = msg.model_dump()
+        elif isinstance(msg, (BaseModel, object)) and hasattr(msg, 'dict'):
+            # Pydantic v1 使用 dict() 转为字典
+            msg_dict = msg.dict()
+        else:
+            # 本身就是字典，直接使用
+            msg_dict = msg.copy() if isinstance(msg, dict) else {}
+        
+        # 2. 提取content并标准化
+        content = msg_dict.get("content", "")
+        
+        # 如果content是字典，转为JSON字符串或提取其中的文本
+        if isinstance(content, dict):
+            content_str = json.dumps(content, ensure_ascii=False)
+            # 尝试提取嵌套字典中的真实回答文本（适配你的特殊格式）
+            try:
+                if "answer" in str(content):
+                    for v in content.values():
+                        if isinstance(v, dict) and "answer" in v:
+                            content_str = v["answer"]
+                            break
+            except Exception as e:
+                print(f"提取嵌套文本失败: {e}")
+                pass
+        elif isinstance(content, list):
+            # 多模态数组，保持原样（API支持）
+            content_str = content
+        else:
+            # 其他类型（如None/数字）转为字符串
+            content_str = str(content) if content is not None else ""
+        
+        # 3. 构造标准化后的消息字典
+        normalized_msg = {
+            "role": msg_dict.get("role", ""),
+            "content": content_str
+        }
+        normalized.append(normalized_msg)
+    
+    return normalized
+
+def validate_tool_messages(messages):
+    """
+    增强版：校验工具消息顺序 + 过滤空内容tool消息
+    """
+    validated_messages = []
+    has_previous_tool_calls = False
+    
+    for idx, msg in enumerate(messages):
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        
+        # 处理assistant消息：检查tool_calls
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls", [])
+            has_previous_tool_calls = len(tool_calls) > 0
+            validated_messages.append(msg)
+        
+        # 处理tool消息：双重校验（有前置tool_calls + 内容非空）
+        elif role == "tool":
+            # 校验1：有前置tool_calls
+            if not has_previous_tool_calls:
+                print(f"丢弃非法tool消息（无前置tool_calls）：{msg}")
+                continue
+            # 校验2：content非空（排除'{}'/'null'/空字符串等）
+            clean_content = content.strip()
+            if clean_content in ["", "{}", "null", "[]"]:
+                print(f"丢弃空内容tool消息：{msg}")
+                has_previous_tool_calls = False  # 重置标记
+                continue
+            # 校验3：有tool_call_id（可选，增强规范）
+            if "tool_call_id" not in msg:
+                print(f"警告：tool消息缺少tool_call_id，已补充默认值：{msg}")
+                msg["tool_call_id"] = "default_call_id"  # 临时补充，避免格式错误
+            
+            validated_messages.append(msg)
+            has_previous_tool_calls = False
+        
+        # 其他角色消息直接保留
+        else:
+            validated_messages.append(msg)
+    
+    return validated_messages
+
 
 
 class BaseLLM:
@@ -160,7 +256,7 @@ class BaseAPILLM(BaseLLM):
 
     def __init__(self,
                  model_type: str,
-                 retry: int = 2,
+                 retry: int = 3,
                  *,
                  max_new_tokens: int = 2048,
                  top_p: float = 0.8,
@@ -500,7 +596,7 @@ class GPTAPI(BaseAPILLM):
             except KeyboardInterrupt:
                 raise  # 重新抛出让上层处理
             except Exception as e:
-                logger.error(f"Streaming error: {str(e)}")
+                self.logger.error(f"Streaming error: {str(e)}")
                 raise
             finally:
                 # 确保响应流被关闭
@@ -533,8 +629,13 @@ class GPTAPI(BaseAPILLM):
             openai.api_key = self.keys[self.key_ctr]
             openai.base_url = self.url
             response = dict()
+            print("basellm line 624, messaage:", messages)
+            messages = normalize_message_content(messages)
+            messages = validate_tool_messages(messages)     
+            
             try:
                 if tools:
+                    print("basellm line 629, messaage:", messages)
                     response = openai.chat.completions.create(
                         messages=messages,
                         tools=tools,
@@ -543,7 +644,7 @@ class GPTAPI(BaseAPILLM):
                     )
                     return streaming(response, has_tool=True)
                 else:
-                    print(messages)
+                    print("basellm line 637, messaage:", messages)
                     response = openai.chat.completions.create(
                         messages=messages,
                         **data

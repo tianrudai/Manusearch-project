@@ -87,7 +87,25 @@ class GoogleSearch(BaseTool):
         Args:
             query (List[str]): list of search query strings
         """
-        queries = query if isinstance(query, list) else [query]
+        
+        # 核心修复：标准化query为字符串列表
+        if isinstance(query, dict):
+            # 从字典中提取query字段（兼容你的字典格式）
+            queries = query.get("query", [])
+            # 确保提取结果是列表（防止单个字符串）
+            if not isinstance(queries, list):
+                queries = [str(queries)]
+            # 可选：打印intent日志（保留原有意图信息）
+            print(f"websearch_lin98 intent: {intent} | original dict query: {query}")
+        elif isinstance(query, str):
+            queries = [query]
+        elif isinstance(query, list):
+            queries = [str(q) for q in query]  # 确保列表元素都是字符串
+        else:
+            warnings.warn(f"不支持的查询类型：{type(query)}，使用空查询")
+            queries = []
+        
+        #queries = query if isinstance(query, list) else [query]  原来的写法
         _search_results = {}
 
         with ThreadPoolExecutor() as executor:
@@ -95,9 +113,27 @@ class GoogleSearch(BaseTool):
 
             for future in concurrent.futures.as_completed(future_to_query, timeout=60):
                 query = future_to_query[future]
-                print("websearch_lin98", query)
+                print("websearch_lin98 query", query)
+
                 try:
                     results = future.result(timeout=20)
+                    # 2. 打印实际的结果（而非方法对象）
+                    print(f"websearch_lin98 result: {results}")
+                
+                    # 3. 处理搜索结果，去重并合并摘要
+                    if results and isinstance(results, dict):  # 增加结果有效性检查
+                        for result in results.values():
+                            # 确保result包含必要的字段，避免KeyError
+                            if 'url' in result and 'summ' in result:
+                                url = result['url']
+                                if url not in _search_results:
+                                    _search_results[url] = result.copy()  # 复制避免修改原数据
+                                else:
+                                    # 合并摘要，避免重复换行
+                                    existing_summ = _search_results[url]['summ'].strip()
+                                    new_summ = result['summ'].strip()
+                                    if new_summ and new_summ not in existing_summ:
+                                       _search_results[url]['summ'] = f"{existing_summ}\n{new_summ}"
                 except Exception as exc:
                     warnings.warn(f'{query} generated an exception: {exc}')
                 else:

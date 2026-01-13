@@ -212,14 +212,51 @@ async def main_async():
 
     t = time.localtime()
     random_num = str(random.randint(0, 99)).zfill(2)
-    result_json_name = f'{args.split}.{t.tm_mon}.{t.tm_mday},{t.tm_hour}:{t.tm_min}.{random_num}.json'
+    result_json_name = f'{args.split}-{t.tm_mon}-{t.tm_mday}-{t.tm_hour}-{t.tm_min}-{random_num}.json'
+    
+    
+    # 写入前检查数据
+    if not filtered_data:
+        print("警告：filtered_data 为空，写入的JSON文件将是空的！")
+    else:
+        print(f"即将写入 {len(filtered_data)} 条数据到文件")
 
     for item, seq in zip(filtered_data, completed_sequences):
         item['Output'] = seq['output']
         item['think'] = seq['think']  # Updated field name
-        
+    
+    
+    
+    # 写入文件前，添加这些校验代码
+    print("===== 数据校验 =====")
+    # 1. 打印原始数据（看真实内容）
+    print(f"filtered_data 原始内容：{filtered_data}")
+    # 2. 检查数据类型
+    print(f"filtered_data 类型：{type(filtered_data)}")
+    # 3. 尝试手动序列化（模拟json.dump的过程）
+    try:
+        test_json = json.dumps(filtered_data, ensure_ascii=False)
+        print(f"JSON序列化后内容：{test_json}")
+        print(f"序列化后字节数：{len(test_json.encode('utf-8'))} 字节")
+    except Exception as e:
+        print(f"❌ JSON序列化失败：{type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+    print("====================")
+
+
+
     with open(os.path.join(output_dir, result_json_name), mode='w', encoding='utf-8') as json_file:
         json.dump(filtered_data, json_file, indent=4, ensure_ascii=False)
+        
+    # 写入后添加打印
+    full_file_path = os.path.join(output_dir, result_json_name)
+    print(f"结果已保存到：{full_file_path}")
+    # 在原代码的 print("结果已保存到：...") 后添加这两行
+    abs_file_path = os.path.abspath(full_file_path)
+    print(f"📌 文件绝对路径：{abs_file_path}")  # 打印完整的绝对路径
+    print(f"文件是否存在：{os.path.exists(full_file_path)}")
+    print(f"文件大小：{os.path.getsize(full_file_path) if os.path.exists(full_file_path) else '不存在'} 字节")
 
 
     print("Process completed.")
